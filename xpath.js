@@ -1929,7 +1929,7 @@ var xpathAxesRe = [
     xpathAxis.DESCENDANT,
     xpathAxis.FOLLOWING_SIBLING,
     xpathAxis.FOLLOWING,
-    xpathAxis.NAMESPACE,
+//    xpathAxis.NAMESPACE,
     xpathAxis.PARENT,
     xpathAxis.PRECEDING_SIBLING,
     xpathAxis.PRECEDING,
