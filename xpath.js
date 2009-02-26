@@ -1,34 +1,3 @@
-//Copyright (c) 2005,2006 Google Inc.
-//All rights reserved.
-//
-//Redistribution and use in source and binary forms, with or without
-//modification, are permitted provided that the following conditions are
-//met:
-//        
-// * Redistributions of source code must retain the above copyright
-//   notice, this list of conditions and the following disclaimer.
-//
-// * Redistributions in binary form must reproduce the above copyright
-//   notice, this list of conditions and the following disclaimer in the
-//   documentation and/or other materials provided with the
-//   distribution.
-//
-// * Neither the name of Google Inc. nor the names of its contributors
-//   may be used to endorse or promote products derived from this
-//   software without specific prior written permission.
-//
-//THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-//"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-//LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-//A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-//OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-//SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-//LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-//DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-//THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-//(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-//OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 // Copyright 2005 Google Inc.
 // All Rights Reserved
 //
@@ -437,8 +406,21 @@ function stackToString(stack) {
 //   should be upper/lower case.  If you're running xpaths in an
 //   XSLT instance, you probably DO want case sensitivity, as per the
 //   XSL spec.
+//
+//   set/isReturnOnFirstMatch -- whether XPath evaluation should quit as soon
+//   as a result is found. This is an optimization that might make sense if you
+//   only care about the first result.
+//
+//   set/isIgnoreNonElementNodesForNTA -- whether to ignore non-element nodes
+//   when evaluating the "node()" any node test. While technically this is
+//   contrary to the XPath spec, practically it can enhance performance
+//   significantly, and makes sense if you a) use "node()" when you mean "*",
+//   and b) use "//" when you mean "/descendant::*/".
 
-function ExprContext(node, opt_position, opt_nodelist, opt_parent, opt_caseInsensitive, opt_ignoreAttributesWithoutValue) {
+function ExprContext(node, opt_position, opt_nodelist, opt_parent,
+  opt_caseInsensitive, opt_ignoreAttributesWithoutValue,
+  opt_returnOnFirstMatch, opt_ignoreNonElementNodesForNTA)
+{
   this.node = node;
   this.position = opt_position || 0;
   this.nodelist = opt_nodelist || [ node ];
@@ -446,6 +428,8 @@ function ExprContext(node, opt_position, opt_nodelist, opt_parent, opt_caseInsen
   this.parent = opt_parent || null;
   this.caseInsensitive = opt_caseInsensitive || false;
   this.ignoreAttributesWithoutValue = opt_ignoreAttributesWithoutValue || false;
+  this.returnOnFirstMatch = opt_returnOnFirstMatch || false;
+  this.ignoreNonElementNodesForNTA = opt_ignoreNonElementNodesForNTA || false;
   if (opt_parent) {
     this.root = opt_parent.root;
   } else if (this.node.nodeType == DOM_DOCUMENT_NODE) {
@@ -464,7 +448,8 @@ ExprContext.prototype.clone = function(opt_node, opt_position, opt_nodelist) {
       opt_node || this.node,
       typeof opt_position != 'undefined' ? opt_position : this.position,
       opt_nodelist || this.nodelist, this, this.caseInsensitive,
-      this.ignoreAttributesWithoutValue);
+      this.ignoreAttributesWithoutValue, this.returnOnFirstMatch,
+      this.ignoreNonElementNodesForNTA);
 };
 
 ExprContext.prototype.setVariable = function(name, value) {
@@ -520,6 +505,22 @@ ExprContext.prototype.isIgnoreAttributesWithoutValue = function() {
 
 ExprContext.prototype.setIgnoreAttributesWithoutValue = function(ignore) {
   return this.ignoreAttributesWithoutValue = ignore;
+};
+
+ExprContext.prototype.isReturnOnFirstMatch = function() {
+  return this.returnOnFirstMatch;
+};
+
+ExprContext.prototype.setReturnOnFirstMatch = function(returnOnFirstMatch) {
+  return this.returnOnFirstMatch = returnOnFirstMatch;
+};
+
+ExprContext.prototype.isIgnoreNonElementNodesForNTA = function() {
+  return this.ignoreNonElementNodesForNTA;
+};
+
+ExprContext.prototype.setIgnoreNonElementNodesForNTA = function(ignoreNonElementNodesForNTA) {
+  return this.ignoreNonElementNodesForNTA = ignoreNonElementNodesForNTA;
 };
 
 // XPath expression values. They are what XPath expressions evaluate
@@ -700,8 +701,9 @@ LocationExpr.prototype._combineSteps = function(prevStep, nextStep) {
     // maybe suitable to be combined
     if (prevStep.axis == xpathAxis.DESCENDANT_OR_SELF) {
       if (nextStep.axis == xpathAxis.CHILD) {
-        nextStep.axis = xpathAxis.DESCENDANT;
-        return nextStep;
+        // HBC - commenting out, because this is not a valid reduction
+        //nextStep.axis = xpathAxis.DESCENDANT;
+        //return nextStep;
       } else if (nextStep.axis == xpathAxis.SELF) {
         nextStep.axis = xpathAxis.DESCENDANT_OR_SELF;
         return nextStep;
@@ -733,13 +735,50 @@ LocationExpr.prototype.evaluate = function(ctx) {
 function xPathStep(nodes, steps, step, input, ctx) {
   var s = steps[step];
   var ctx2 = ctx.clone(input);
-  var nodelist = s.evaluate(ctx2).nodeSetValue();
-
-  for (var i = 0; i < nodelist.length; ++i) {
-    if (step == steps.length - 1) {
-      nodes.push(nodelist[i]);
-    } else {
-      xPathStep(nodes, steps, step + 1, nodelist[i], ctx);
+  
+  if (ctx.returnOnFirstMatch && !s.hasPositionalPredicate) {
+    var nodelist = s.evaluate(ctx2).nodeSetValue();
+    // the predicates were not processed in the last evaluate(), so that we can
+    // process them here with the returnOnFirstMatch optimization. We do a
+    // depth-first grab at any nodes that pass the predicate tests. There is no
+    // way to optimize when predicates contain positional selectors, including
+    // indexes or uses of the last() or position() functions, because they
+    // typically require the entire nodelist for context. Process without
+    // optimization if we encounter such selectors.
+    var nLength = nodelist.length;
+    var pLength = s.predicate.length;
+    nodelistLoop:
+    for (var i = 0; i < nLength; ++i) {
+      var n = nodelist[i];
+      for (var j = 0; j < pLength; ++j) {
+        if (!s.predicate[j].evaluate(ctx.clone(n, i, nodelist)).booleanValue()) {
+          continue nodelistLoop;
+        }
+      }
+      // n survived the predicate tests!
+      if (step == steps.length - 1) {
+        nodes.push(n);
+      }
+      else {
+        xPathStep(nodes, steps, step + 1, n, ctx);
+      }
+      if (nodes.length > 0) {
+        break;
+      }
+    }
+  }
+  else {
+    // set returnOnFirstMatch to false for the cloned ExprContext, because
+    // behavior in StepExpr.prototype.evaluate is driven off its value. Note
+    // that the original context may still have true for this value.
+    ctx2.returnOnFirstMatch = false;
+    var nodelist = s.evaluate(ctx2).nodeSetValue();
+    for (var i = 0; i < nodelist.length; ++i) {
+      if (step == steps.length - 1) {
+        nodes.push(nodelist[i]);
+      } else {
+        xPathStep(nodes, steps, step + 1, nodelist[i], ctx);
+      }
     }
   }
 }
@@ -748,10 +787,20 @@ function StepExpr(axis, nodetest, opt_predicate) {
   this.axis = axis;
   this.nodetest = nodetest;
   this.predicate = opt_predicate || [];
+  this.hasPositionalPredicate = false;
+  for (var i = 0; i < this.predicate.length; ++i) {
+    if (predicateExprHasPositionalSelector(this.predicate[i].expr)) {
+      this.hasPositionalPredicate = true;
+      break;
+    }
+  }
 }
 
 StepExpr.prototype.appendPredicate = function(p) {
   this.predicate.push(p);
+  if (!this.hasPositionalPredicate) {
+    this.hasPositionalPredicate = predicateExprHasPositionalSelector(p.expr);
+  }
 }
 
 StepExpr.prototype.evaluate = function(ctx) {
@@ -779,13 +828,43 @@ StepExpr.prototype.evaluate = function(ctx) {
     }
 
   } else if (this.axis == xpathAxis.ATTRIBUTE) {
-    if (ctx.ignoreAttributesWithoutValue) {
-      copyArrayIgnoringAttributesWithoutValue(nodelist, input.attributes);
+    if (this.nodetest.name != undefined) {
+      // single-attribute step
+      if (input.attributes) {
+        if (input.attributes instanceof Array) {
+          // probably evaluating on document created by xmlParse()
+          copyArray(nodelist, input.attributes);
+        }
+        else {
+          if (this.nodetest.name == 'style') {
+            var value = input.getAttribute('style');
+            if (value && typeof(value) != 'string') {
+              // this is the case where indexing into the attributes array
+              // doesn't give us the attribute node in IE - we create our own
+              // node instead
+              nodelist.push(XNode.create(DOM_ATTRIBUTE_NODE, 'style',
+                value.cssText, document));
+            }
+            else {
+              nodelist.push(input.attributes[this.nodetest.name]);
+            }
+          }
+          else {
+            nodelist.push(input.attributes[this.nodetest.name]);
+          }
+        }
+      }
     }
     else {
-      copyArray(nodelist, input.attributes);
+      // all-attributes step
+      if (ctx.ignoreAttributesWithoutValue) {
+        copyArrayIgnoringAttributesWithoutValue(nodelist, input.attributes);
+      }
+      else {
+        copyArray(nodelist, input.attributes);
+      }
     }
-
+    
   } else if (this.axis == xpathAxis.CHILD) {
     copyArray(nodelist, input.childNodes);
 
@@ -793,12 +872,12 @@ StepExpr.prototype.evaluate = function(ctx) {
     if (this.nodetest.evaluate(ctx).booleanValue()) {
       nodelist.push(input);
     }
-    var tagName = xpathExtractTagNameFromNodeTest(this.nodetest);
+    var tagName = xpathExtractTagNameFromNodeTest(this.nodetest, ctx.ignoreNonElementNodesForNTA);
     xpathCollectDescendants(nodelist, input, tagName);
     if (tagName) skipNodeTest = true;
 
   } else if (this.axis == xpathAxis.DESCENDANT) {
-    var tagName = xpathExtractTagNameFromNodeTest(this.nodetest);
+    var tagName = xpathExtractTagNameFromNodeTest(this.nodetest, ctx.ignoreNonElementNodesForNTA);
     xpathCollectDescendants(nodelist, input, tagName);
     if (tagName) skipNodeTest = true;
 
@@ -856,13 +935,15 @@ StepExpr.prototype.evaluate = function(ctx) {
   }
 
   // process predicates
-  for (var i = 0; i < this.predicate.length; ++i) {
-    var nodelist0 = nodelist;
-    nodelist = [];
-    for (var ii = 0; ii < nodelist0.length; ++ii) {
-      var n = nodelist0[ii];
-      if (this.predicate[i].evaluate(ctx.clone(n, ii, nodelist0)).booleanValue()) {
-        nodelist.push(n);
+  if (!ctx.returnOnFirstMatch) {
+    for (var i = 0; i < this.predicate.length; ++i) {
+      var nodelist0 = nodelist;
+      nodelist = [];
+      for (var ii = 0; ii < nodelist0.length; ++ii) {
+        var n = nodelist0[ii];
+        if (this.predicate[i].evaluate(ctx.clone(n, ii, nodelist0)).booleanValue()) {
+          nodelist.push(n);
+        }
       }
     }
   }
@@ -1062,6 +1143,14 @@ FunctionCallExpr.prototype.xpathfunctions = {
     var s1 = this.args[1].evaluate(ctx).stringValue();
     return new BooleanValue(s0.indexOf(s1) == 0);
   },
+  
+  'ends-with': function(ctx) {
+    assert(this.args.length == 2);
+    var s0 = this.args[0].evaluate(ctx).stringValue();
+    var s1 = this.args[1].evaluate(ctx).stringValue();
+    var re = new RegExp(RegExp.escape(s1) + '$');
+    return new BooleanValue(re.test(s0));
+  },
 
   'contains': function(ctx) {
     assert(this.args.length == 2);
@@ -1150,6 +1239,26 @@ FunctionCallExpr.prototype.xpathfunctions = {
       s0 = s0.replace(new RegExp(s1.charAt(i), 'g'), s2.charAt(i));
     }
     return new StringValue(s0);
+  },
+  
+  'matches': function(ctx) {
+    assert(this.args.length >= 2);
+    var s0 = this.args[0].evaluate(ctx).stringValue();
+    var s1 = this.args[1].evaluate(ctx).stringValue();
+    if (this.args.length > 2) {
+      var s2 = this.args[2].evaluate(ctx).stringValue();
+      if (/[^mi]/.test(s2)) {
+        throw 'Invalid regular expression syntax: ' + s2;
+      }
+    }
+    
+    try {
+      var re = new RegExp(s1, s2);
+    }
+    catch (e) {
+      throw 'Invalid matches argument: ' + s1;
+    }
+    return new BooleanValue(re.test(s0));
   },
 
   'boolean': function(ctx) {
@@ -1311,13 +1420,24 @@ function PathExpr(filter, rel) {
 PathExpr.prototype.evaluate = function(ctx) {
   var nodes = this.filter.evaluate(ctx).nodeSetValue();
   var nodes1 = [];
-  for (var i = 0; i < nodes.length; ++i) {
-    var nodes0 = this.rel.evaluate(ctx.clone(nodes[i], i, nodes)).nodeSetValue();
-    for (var ii = 0; ii < nodes0.length; ++ii) {
-      nodes1.push(nodes0[ii]);
+  if (ctx.returnOnFirstMatch) {
+    for (var i = 0; i < nodes.length; ++i) {
+      nodes1 = this.rel.evaluate(ctx.clone(nodes[i], i, nodes)).nodeSetValue();
+      if (nodes1.length > 0) {
+        break;
+      }
     }
+    return new NodeSetValue(nodes1);
   }
-  return new NodeSetValue(nodes1);
+  else {
+    for (var i = 0; i < nodes.length; ++i) {
+      var nodes0 = this.rel.evaluate(ctx.clone(nodes[i], i, nodes)).nodeSetValue();
+      for (var ii = 0; ii < nodes0.length; ++ii) {
+        nodes1.push(nodes0[ii]);
+      }
+    }
+    return new NodeSetValue(nodes1);
+  }
 };
 
 function FilterExpr(expr, predicate) {
@@ -1326,7 +1446,15 @@ function FilterExpr(expr, predicate) {
 }
 
 FilterExpr.prototype.evaluate = function(ctx) {
+  // the filter expression should be evaluated in its entirety with no
+  // optimization, as we can't backtrack to it after having moved on to
+  // evaluating the relative location path. See the testReturnOnFirstMatch
+  // unit test.
+  var flag = ctx.returnOnFirstMatch;
+  ctx.setReturnOnFirstMatch(false);
   var nodes = this.expr.evaluate(ctx).nodeSetValue();
+  ctx.setReturnOnFirstMatch(flag);
+  
   for (var i = 0; i < this.predicate.length; ++i) {
     var nodes0 = nodes;
     nodes = [];
@@ -2236,11 +2364,21 @@ function xpathCollectDescendants(nodelist, node, opt_tagName) {
   }
 }
 
-// DGF extract a tag name suitable for getElementsByTagName
-function xpathExtractTagNameFromNodeTest(nodetest) {
+/**
+ * DGF - extract a tag name suitable for getElementsByTagName
+ *
+ * @param nodetest                     the node test
+ * @param ignoreNonElementNodesForNTA  if true, the node list returned when
+ *                                     evaluating "node()" will not contain
+ *                                     non-element nodes. This can boost
+ *                                     performance. This is false by default.
+ */
+function xpathExtractTagNameFromNodeTest(nodetest, ignoreNonElementNodesForNTA) {
   if (nodetest instanceof NodeTestName) {
     return nodetest.name;
-  } else if (nodetest instanceof NodeTestAny || nodetest instanceof NodeTestElementOrAttribute) {
+  }
+  if ((ignoreNonElementNodesForNTA && nodetest instanceof NodeTestAny) ||
+    nodetest instanceof NodeTestElementOrAttribute) {
     return "*";
   }
 }
