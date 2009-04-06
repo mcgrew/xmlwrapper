@@ -110,10 +110,10 @@ XMLWrapper.prototype.toString = function( selector, context ){
 
 XMLWrapper.prototype.toStrings = function( selector, context )
 {
-	var returnValue = [ ];
-		this.getElements( selector, context ).each( function( node ){
-			returnValue.push(  new XMLSerializer( ).serializeToString( node ));
-		});
+	var elements = this.getElements( selector, context );
+	var returnValue = new Array( elements.length );
+	for( var i = 0; i < elements.length; i++ )
+		returnValue[ i ] =  new XMLSerializer( ).serializeToString( elements[ i ] );
 	return returnValue;
 };
 
@@ -180,11 +180,11 @@ XMLWrapper.prototype.setValue = function( selector, text, context )
 
 XMLWrapper.prototype.getValues = function( selector, context )
 {
-	var returnValue = [ ];
-	var elements = this.getElements( selector, context );
-	for ( var i=0; i < elements.length; i++ )
-		returnValue.push( xmlValue( elements[ i ] ) )
-	return returnValue;
+ 	var elements = this.getElements( selector, context );
+	var returnValue = new Array( elements.length );
+ 	for ( var i=0; i < elements.length; i++ )
+		returnValue[ i ] = xmlValue( elements[ i ]);
+ 	return returnValue;
 };
 
 XMLWrapper.prototype.setValues = function( selector, textArray, context )
@@ -207,9 +207,9 @@ XMLWrapper.prototype.getTagName = function( selector, context )
 XMLWrapper.prototype.getTagNames = function( selector, context )
 {
 	var tags = this.getElements( selector, context );
-	var returnvalue = [ ];
+	var returnvalue = new Array( tags.length );
 	for( var i=0; i < tags.length; i++ )
-		returnvalue.push( tags[ i ].tagName );
+		returnvalue[ i ] = tags[ i ].tagName;
 	return returnvalue;
 };
 
