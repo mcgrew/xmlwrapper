@@ -45,6 +45,10 @@ XMLDisplay.load = function( outerContainer, element ){
 		openTag.className = 'xml_openTag';
 		var tagText = '<'+element.tagName
 		// attributes go here
+		for ( var i=0; i < element.attributes.length; i++ )
+		{
+			tagText += ' '+element.attributes[ i ].nodeName+'="'+element.attributes[ i ].value+'"';
+		}
 		if ( !element.childNodes.length )
 		{
 			tagText += '/';
@@ -94,7 +98,7 @@ XMLDisplay.toggleCollapsed = function( )
 
 XMLDisplay.addStyle = function( ){
 	if ( XMLDisplay.style ) return XMLDisplay.style;
-	var styleString = ".xml_container{padding-left:15px;border-left:1px solid #aaa}.xml_openTag,.xml_closeTag,.xml_emptyTag{font-weight:bold;color:#408;}.xml_openTag:hover{color:#0f0;cursor:pointer}.xml_emptyTag{color:#999;}.xml_collapsed{color:#f00;}.xml_openTag.xml_collapsed+.xml_container,.xml_openTag.xml_collapsed+.xml_container+.xml_closeTag{display:none;}";
+	var styleString = ".xml_container{padding-left:15px;border-left:1px solid #ddd}.xml_openTag,.xml_closeTag,.xml_emptyTag{font-weight:bold;color:#408;}.xml_openTag:hover{color:#0f0;cursor:pointer}.xml_emptyTag{color:#999;}.xml_collapsed{color:#f00;}.xml_openTag.xml_collapsed+.xml_container,.xml_openTag.xml_collapsed+.xml_container+.xml_closeTag{display:none;}";
 	XMLDisplay.style = document.createElement( 'style' );
 	XMLDisplay.style.setAttribute( 'type', 'text/css' )
 	XMLDisplay.style.id = 'XMLDisplayStyle';
