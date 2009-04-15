@@ -238,10 +238,10 @@ XMLWrapper.prototype.getContents = function( selector, context )
 	var strings = this.toStrings( selector, context );
 	for ( i=0; i < strings.length; i++ )
 	{
-		contents = /[^>]*>(.*)<[^<]*/.exec( strings[ i ]  ):
+		contents = /[^>]*>(.*)<[^<]*/.exec( strings[ i ]  );
 		strings[ i ] = ( contents ) ? content[1] : null;
 	}
-			return strings;
+	return strings;
 };
 
 
