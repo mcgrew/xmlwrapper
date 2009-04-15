@@ -54,7 +54,13 @@ XMLDisplay.load = function( outerContainer, element ){
 			tagText += '/';
 			openTag.className = "xml_emptyTag"
 		}
-		else openTag.onclick = XMLDisplay.toggleCollapsed
+		else 
+		{
+			if ( openTag.addEventListener )
+				openTag.addEventListener( 'click', XMLDisplay.toggleCollapsed, false );
+			else
+				openTag.onclick = XMLDisplay.toggleCollapsed;
+		}
 		tagText += '>'
 		openTag.appendChild( document.createTextNode( tagText ));
 		outerContainer.appendChild( openTag );
@@ -90,19 +96,30 @@ XMLDisplay.load = function( outerContainer, element ){
 
 XMLDisplay.toggleCollapsed = function( )
 {
-	if ( /\bxml_collapsed\b/.exec( this.className ))
+	var next = this;
+	if ( /\bxml_collapsed\b/.test( this.className ))
+	{
 		this.className = this.className.replace( /xml_collapsed/g, '' );
+		do {
+			(next = next.nextSibling).style.display='';
+		} while( !/\bxml_closeTag\b/.test( next.className ));
+	}
 	else
+	{
 		this.className += ' xml_collapsed';
+		do {
+			(next = next.nextSibling).style.display='none';
+		} while( !/\bxml_closeTag\b/.test( next.className ));
+	}
 }
 
 XMLDisplay.addStyle = function( ){
 	if ( XMLDisplay.style ) return XMLDisplay.style;
-	var styleString = ".xml_container{padding-left:15px;border-left:1px solid #ddd}.xml_openTag,.xml_closeTag,.xml_emptyTag{font-weight:bold;color:#408;}.xml_openTag:hover{color:#0f0;cursor:pointer}.xml_emptyTag{color:#999;}.xml_collapsed{color:#f00;}.xml_openTag.xml_collapsed+.xml_container,.xml_openTag.xml_collapsed+.xml_container+.xml_closeTag{display:none;}";
+	var styleString = ".xml_container{padding-left:15px;border-left:1px solid #ddd}.xml_openTag,.xml_closeTag,.xml_emptyTag{font-weight:bold;color:#408;}.xml_openTag:hover{color:#0f0;cursor:pointer}.xml_emptyTag{color:#999;}.xml_collapsed{color:#f00;}";
 	XMLDisplay.style = document.createElement( 'style' );
 	XMLDisplay.style.setAttribute( 'type', 'text/css' )
 	XMLDisplay.style.id = 'XMLDisplayStyle';
-	if ( /MSIE/.test( navigator.useragent )) XMLDisplay.style.styleSheet.cssText = styleString;
+	if ( /MSIE/.test( navigator.userAgent ) && !window.opera ) XMLDisplay.style.styleSheet.cssText = styleString;
 	else XMLDisplay.style.appendChild( document.createTextNode( styleString ));
 	var head = document.getElementsByTagName( 'head' )[ 0 ];
 	var i = 0;
@@ -110,7 +127,7 @@ XMLDisplay.addStyle = function( ){
 		if ( head.childNodes[ i ].tagName == 'style' || head.childNodes[ i ].tagName == 'link' ) break; 
 		i++; 
 	}
-	head.insertBefore( XMLDisplay.style, head.childNodes[ i ] );
-//	head.appendChild( XMLDisplay.style );
+//	head.insertBefore( XMLDisplay.style, head.childNodes[ i ] );
+	head.appendChild( XMLDisplay.style );
 	return XMLDisplay.style;
 }
