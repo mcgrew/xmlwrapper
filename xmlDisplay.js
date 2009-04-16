@@ -123,11 +123,8 @@ XMLDisplay.addStyle = function( ){
 	else XMLDisplay.style.appendChild( document.createTextNode( styleString ));
 	var head = document.getElementsByTagName( 'head' )[ 0 ];
 	var i = 0;
-	while ( head.childNodes[ i ] ) { 
-		if ( head.childNodes[ i ].tagName == 'style' || head.childNodes[ i ].tagName == 'link' ) break; 
+	while ( head.childNodes[ i ] && ( !head.childNodes[ i ].tagName || ( head.childNodes[ i ].tagName.toLowerCase( ) != 'style' && head.childNodes[ i ].tagName.toLowerCase( ) != 'link' ))) 
 		i++; 
-	}
-//	head.insertBefore( XMLDisplay.style, head.childNodes[ i ] );
-	head.appendChild( XMLDisplay.style );
+	head.insertBefore( XMLDisplay.style, ( head.childNodes[ i ] ) ? head.childNodes[ i ] : null );
 	return XMLDisplay.style;
 }
