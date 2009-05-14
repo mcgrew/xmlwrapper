@@ -223,8 +223,9 @@ XMLWrapper.prototype.removeElement = function( selector, context )
 XMLWrapper.prototype.removeElements = function( selector, context )
 {
 	selector = this.getElements( selector, context );
-	for( var i=0; i < selector.length; i++ )
-		selector[i].parentNode.removeChild( selector[i] )
+	var i = selector.length;
+	while( i-- )
+		selector[i].parentNode.removeChild( selector[i] );
 	return selector;
 };
 
